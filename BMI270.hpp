@@ -200,11 +200,16 @@ class BMI270 : public LibXR::Application
         this);
     int1_->RegisterCallback(cb);
 
+    ReadSingle(REG_CHIP_ID);
+    LibXR::Thread::Sleep(10);
+
     // 初始化失败则软复位后重试
     while (!Init())
     {
       WriteSingle(REG_CMD, CMD_SOFTRESET);
       LibXR::Thread::Sleep(100);
+      ReadSingle(REG_CHIP_ID);
+      LibXR::Thread::Sleep(10);
     }
 
     // 采样线程：最高优先级实时线程
@@ -216,10 +221,10 @@ class BMI270 : public LibXR::Application
         [](BMI270 *self)
         {
           float d = self->pid_heat_.Calculate(self->target_temperature_,
-                                              self->temperature_, 0.01f);
+                                              self->temperature_, 0.001f);
           self->pwm_->SetDutyCycle(std::clamp(d, 0.0f, 1.0f));
         },
-        this, 10);
+        this, 1);
     LibXR::Timer::Add(temp_ctrl);
     LibXR::Timer::Start(temp_ctrl);
   }
@@ -363,12 +368,6 @@ class BMI270 : public LibXR::Application
 
     // 10) 初始化时间戳，用于 dt 监控
     last_sample_ts_ = LibXR::Timebase::GetMicroseconds();
-
-    XR_LOG_INFO(
-        "PWR_CTRL=%02X ACC_CONF=%02X GYR_CONF=%02X INT1_IO=%02X MAP=%02X LATCH=%02X",
-        ReadSingle(REG_PWR_CTRL), ReadSingle(REG_ACC_CONF), ReadSingle(REG_GYR_CONF),
-        ReadSingle(REG_INT1_IO_CTRL), ReadSingle(REG_INT_MAP_DATA),
-        ReadSingle(REG_INT_LATCH));
 
     return true;
   }
@@ -579,7 +578,8 @@ class BMI270 : public LibXR::Application
         self->in_cali_ = true;
 
         LibXR::STDIO::Printf(
-            "Starting BMI270 gyroscope calibration. Please keep the device steady.\r\n");
+            "Starting BMI270 gyroscope calibration. Please "
+            "keep the device steady.\r\n");
 
         // 给用户一点时间把设备放稳
         LibXR::Thread::Sleep(3000);
