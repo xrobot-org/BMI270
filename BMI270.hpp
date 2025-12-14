@@ -360,7 +360,7 @@ class BMI270 : public LibXR::Application
     WriteSingle(REG_GYR_RANGE, static_cast<uint8_t>(gyro_range_));
 
     // 9) 配置 INT1：推挽输出，高电平有效；映射加速度/陀螺仪数据就绪中断
-    WriteSingle(REG_INT1_IO_CTRL, 0x0C);  // push-pull, active high
+    WriteSingle(REG_INT1_IO_CTRL, 0x0A);  // push-pull, active high
     WriteSingle(REG_INT_MAP_DATA, 0x44);  // gyr/acc drdy -> INT1
     WriteSingle(REG_INT_LATCH, 0x00);     // 非锁存模式（脉冲）
 
