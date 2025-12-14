@@ -187,8 +187,8 @@ class BMI270 : public LibXR::Application
 
     // 配置数据就绪中断引脚
     int1_->DisableInterrupt();
-    int1_->SetConfig({.direction = LibXR::GPIO::Direction::FALL_INTERRUPT,
-                      .pull = LibXR::GPIO::Pull::UP});
+    int1_->SetConfig({.direction = LibXR::GPIO::Direction::RISING_INTERRUPT,
+                      .pull = LibXR::GPIO::Pull::DOWN});
     auto cb = LibXR::GPIO::Callback::Create(
         [](bool in_isr, BMI270 *self)
         {
@@ -360,7 +360,7 @@ class BMI270 : public LibXR::Application
     WriteSingle(REG_GYR_RANGE, static_cast<uint8_t>(gyro_range_));
 
     // 9) 配置 INT1：推挽输出，高电平有效；映射加速度/陀螺仪数据就绪中断
-    WriteSingle(REG_INT1_IO_CTRL, 0x0C);  // push-pull, active high
+    WriteSingle(REG_INT1_IO_CTRL, 0x0A);  // push-pull, active high
     WriteSingle(REG_INT_MAP_DATA, 0x44);  // gyr/acc drdy -> INT1
     WriteSingle(REG_INT_LATCH, 0x00);     // 非锁存模式（脉冲）
 
