@@ -305,7 +305,8 @@ class BMI270 : public LibXR::Application
     float ideal_dt = IdealDt();
     if (ideal_dt > 0.0f && std::fabs(dt_.ToSecondf() - ideal_dt) > 0.00015f)
     {
-      XR_LOG_WARN("BMI270 dt=%d", dt_);
+      XR_LOG_WARN("BMI270 dt_us=%u",
+                  static_cast<unsigned>(dt_.ToMicrosecond()));
     }
   }
 
@@ -381,7 +382,7 @@ class BMI270 : public LibXR::Application
 
     while (true)
     {
-      bool got = (self->new_data_.Wait(100) == ErrorCode::OK);
+      bool got = (self->new_data_.Wait(100) == LibXR::ErrorCode::OK);
       if (!got)
       {
         // 如果信号丢失，主动读取一次中断状态，避免卡死
@@ -554,17 +555,17 @@ class BMI270 : public LibXR::Application
   {
     if (argc == 1)
     {
-      LibXR::STDIO::Printf("Usage:\r\n");
-      LibXR::STDIO::Printf("  show [time_ms] [interval_ms]\r\n");
-      LibXR::STDIO::Printf("  list_offset\r\n");
-      LibXR::STDIO::Printf("  cali\r\n");
+      LibXR::STDIO::Printf<"Usage:\r\n">();
+      LibXR::STDIO::Printf<"  show [time_ms] [interval_ms]\r\n">();
+      LibXR::STDIO::Printf<"  list_offset\r\n">();
+      LibXR::STDIO::Printf<"  cali\r\n">();
       return 0;
     }
     else if (argc == 2)
     {
       if (strcmp(argv[1], "list_offset") == 0)
       {
-        LibXR::STDIO::Printf("bias: %f %f %f\r\n", self->gyro_bias_key_.data_.x(),
+        LibXR::STDIO::Printf<"bias: %f %f %f\r\n">(self->gyro_bias_key_.data_.x(),
                              self->gyro_bias_key_.data_.y(),
                              self->gyro_bias_key_.data_.z());
         return 0;
@@ -577,9 +578,8 @@ class BMI270 : public LibXR::Application
         self->cali_counter_ = 0;
         self->in_cali_ = true;
 
-        LibXR::STDIO::Printf(
-            "Starting BMI270 gyroscope calibration. Please "
-            "keep the device steady.\r\n");
+        LibXR::STDIO::Printf<"Starting BMI270 gyroscope calibration. Please "
+            "keep the device steady.\r\n">();
 
         // 给用户一点时间把设备放稳
         LibXR::Thread::Sleep(3000);
@@ -587,10 +587,10 @@ class BMI270 : public LibXR::Application
         // 采集 60 秒数据
         for (int i = 0; i < 60; i++)
         {
-          LibXR::STDIO::Printf("Progress: %d / 60\r", i + 1);
+          LibXR::STDIO::Printf<"Progress: %d / 60\r">(i + 1);
           LibXR::Thread::Sleep(1000);
         }
-        LibXR::STDIO::Printf("\r\nProgress: Done\r\n");
+        LibXR::STDIO::Printf<"\r\nProgress: Done\r\n">();
 
         // 停止累积
         self->in_cali_ = false;
@@ -598,7 +598,7 @@ class BMI270 : public LibXR::Application
 
         if (self->cali_counter_ == 0)
         {
-          LibXR::STDIO::Printf("BMI270 calibration failed: no samples collected.\r\n");
+          LibXR::STDIO::Printf<"BMI270 calibration failed: no samples collected.\r\n">();
           return -1;
         }
 
@@ -617,12 +617,12 @@ class BMI270 : public LibXR::Application
                                          DEG2RAD;
         // NOLINTEND
 
-        LibXR::STDIO::Printf("\r\nBMI270 calibration result - x: %f, y: %f, z: %f\r\n",
+        LibXR::STDIO::Printf<"\r\nBMI270 calibration result - x: %f, y: %f, z: %f\r\n">(
                              self->gyro_bias_key_.data_.x(),
                              self->gyro_bias_key_.data_.y(),
                              self->gyro_bias_key_.data_.z());
 
-        LibXR::STDIO::Printf("Analyzing calibration quality...\r\n");
+        LibXR::STDIO::Printf<"Analyzing calibration quality...\r\n">();
 
         self->gyro_cali_ = Eigen::Matrix<int64_t, 3, 1>(0, 0, 0);
         self->cali_counter_ = 0;
@@ -630,10 +630,10 @@ class BMI270 : public LibXR::Application
 
         for (int i = 0; i < 60; i++)
         {
-          LibXR::STDIO::Printf("Progress: %d / 60\r", i + 1);
+          LibXR::STDIO::Printf<"Progress: %d / 60\r">(i + 1);
           LibXR::Thread::Sleep(1000);
         }
-        LibXR::STDIO::Printf("\r\nProgress: Done\r\n");
+        LibXR::STDIO::Printf<"\r\nProgress: Done\r\n">();
 
         self->in_cali_ = false;
         LibXR::Thread::Sleep(1000);
@@ -650,12 +650,12 @@ class BMI270 : public LibXR::Application
         double err_y = avg_y2 - self->gyro_bias_key_.data_.y();
         double err_z = avg_z2 - self->gyro_bias_key_.data_.z();
 
-        LibXR::STDIO::Printf("\r\nBMI270 calibration error - x: %f, y: %f, z: %f\r\n",
+        LibXR::STDIO::Printf<"\r\nBMI270 calibration error - x: %f, y: %f, z: %f\r\n">(
                              err_x, err_y, err_z);
 
         // 存进数据库
         self->gyro_bias_key_.Set(self->gyro_bias_key_.data_);
-        LibXR::STDIO::Printf("BMI270 calibration data saved.\r\n");
+        LibXR::STDIO::Printf<"BMI270 calibration data saved.\r\n">();
         return 0;
       }
     }
@@ -666,8 +666,7 @@ class BMI270 : public LibXR::Application
       delay = std::clamp(delay, 2, 1000);
       while (time > 0)
       {
-        LibXR::STDIO::Printf(
-            "acc:%+5f %+5f %+5f | gyr:%+5f %+5f %+5f | T:%4.2f\r\n", self->accl_data_.x(),
+        LibXR::STDIO::Printf<"acc:%+5f %+5f %+5f | gyr:%+5f %+5f %+5f | T:%4.2f\r\n">(self->accl_data_.x(),
             self->accl_data_.y(), self->accl_data_.z(), self->gyro_data_.x(),
             self->gyro_data_.y(), self->gyro_data_.z(), self->temperature_);
         LibXR::Thread::Sleep(delay);
@@ -675,7 +674,7 @@ class BMI270 : public LibXR::Application
       }
       return 0;
     }
-    LibXR::STDIO::Printf("bad args\r\n");
+    LibXR::STDIO::Printf<"bad args\r\n">();
     return -1;
   }
 
