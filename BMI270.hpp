@@ -3,36 +3,6 @@
 // clang-format off
 /* === MODULE MANIFEST V2 ===
 module_description: Bosch BMI270 六轴 IMU 传感器模块 / Bosch BMI270 6-axis IMU Driver
-constructor_args:
-  - gyro_datarate: BMI270::DataRateGyro::DATA_RATE_800HZ
-  - accel_datarate: BMI270::DataRateAccel::DATA_RATE_800HZ
-  - accl_range: BMI270::AcclRange::RANGE_8G
-  - gyro_range: BMI270::GyroRange::DPS_2000
-  - accl_bwp: BMI270::AcclFilterBwp::NORMAL
-  - gyro_bwp: BMI270::GyroFilterBwp::NORMAL
-  - rotation:
-      w: 1.0
-      x: 0.0
-      y: 0.0
-      z: 0.0
-  - pid_param:
-      k: 0.2
-      p: 1.0
-      i: 0.1
-      d: 0.0
-      i_limit: 0.3
-      out_limit: 1.0
-      cycle: false
-  - gyro_topic_name: "bmi270_gyro"
-  - accl_topic_name: "bmi270_accl"
-  - target_temperature: 45.0
-  - task_stack_depth: 512
-  - spi_name: "spi_bmi270"
-  - cs_name: "bmi270_cs"
-  - int1_name: "bmi270_int1"
-  - pwm_name: "pwm_bmi270_heat"
-template_args: []
-required_hardware: ramfs database
 depends: []
 === END MANIFEST === */
 // clang-format on
@@ -41,18 +11,20 @@ depends: []
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 
 #include "Eigen/Core"
-#include "app_framework.hpp"
 #include "database.hpp"
 #include "gpio.hpp"
 #include "message.hpp"
 #include "pid.hpp"
 #include "pwm.hpp"
+#include "ramfs.hpp"
 #include "spi.hpp"
+#include "thread.hpp"
 #include "transform.hpp"
 
-class BMI270 : public LibXR::Application
+class BMI270
 {
  public:
   static constexpr uint8_t REG_CHIP_ID = 0x00;
@@ -154,13 +126,14 @@ class BMI270 : public LibXR::Application
     // 0x03 保留
   };
 
-  BMI270(LibXR::HardwareContainer &hw, LibXR::ApplicationManager &app,
+  BMI270(LibXR::GPIO& external_cs_name, LibXR::GPIO& external_int1_name,
+         LibXR::SPI& external_spi_name, LibXR::PWM& external_pwm_name,
+         LibXR::Database& external_database, LibXR::RamFS& external_ramfs,
          DataRateGyro gyro_datarate, DataRateAccel accel_datarate, AcclRange accl_range,
          GyroRange gyro_range, AcclFilterBwp accl_bwp, GyroFilterBwp gyro_bwp,
-         LibXR::Quaternion<float> &&rotation, LibXR::PID<float>::Param pid_param,
-         const char *gyro_topic_name, const char *accl_topic_name,
-         float target_temperature, size_t task_stack_depth, const char *spi_name,
-         const char *cs_name, const char *int1_name, const char *pwm_name)
+         LibXR::Quaternion<float>&& rotation, LibXR::PID<float>::Param pid_param,
+         const char* gyro_topic_name, const char* accl_topic_name,
+         float target_temperature, size_t task_stack_depth)
       : data_rate_gyro_(gyro_datarate),
         data_rate_accel_(accel_datarate),
         accl_range_(accl_range),
@@ -172,25 +145,23 @@ class BMI270 : public LibXR::Application
         target_temperature_(target_temperature),
         topic_gyro_(LibXR::Topic::CreateTopic<decltype(gyro_data_)>(gyro_topic_name)),
         topic_accl_(LibXR::Topic::CreateTopic<decltype(accl_data_)>(accl_topic_name)),
-        cs_(hw.template FindOrExit<LibXR::GPIO>({cs_name})),
-        int1_(hw.template FindOrExit<LibXR::GPIO>({int1_name})),
-        spi_(hw.template FindOrExit<LibXR::SPI>({spi_name})),
-        pwm_(hw.template FindOrExit<LibXR::PWM>({pwm_name})),
+        cs_(std::addressof(external_cs_name)),
+        int1_(std::addressof(external_int1_name)),
+        spi_(std::addressof(external_spi_name)),
+        pwm_(std::addressof(external_pwm_name)),
         op_spi_(sem_spi_),
         cmd_file_(LibXR::RamFS::CreateFile("bmi270", CommandFunc, this)),
-        gyro_bias_key_(*hw.template FindOrExit<LibXR::Database>({"database"}),
-                       "bmi270_gyro_bias", Eigen::Matrix<float, 3, 1>(0.0f, 0.0f, 0.0f))
+        gyro_bias_key_(external_database, "bmi270_gyro_bias",
+                       Eigen::Matrix<float, 3, 1>(0.0f, 0.0f, 0.0f))
   {
-    app.Register(*this);
-
-    hw.template FindOrExit<LibXR::RamFS>({"ramfs"})->Add(cmd_file_);
+    external_ramfs.Add(cmd_file_);
 
     // 配置数据就绪中断引脚
     int1_->DisableInterrupt();
     int1_->SetConfig({.direction = LibXR::GPIO::Direction::RISING_INTERRUPT,
                       .pull = LibXR::GPIO::Pull::DOWN});
     auto cb = LibXR::GPIO::Callback::Create(
-        [](bool in_isr, BMI270 *self)
+        [](bool in_isr, BMI270* self)
         {
           auto now = LibXR::Timebase::GetMicroseconds();
           self->dt_ = now - self->last_sample_ts_;
@@ -217,8 +188,8 @@ class BMI270 : public LibXR::Application
                    LibXR::Thread::Priority::REALTIME);
 
     // 温控 PID 定时任务（加热 PWM）
-    auto temp_ctrl = LibXR::Timer::CreateTask<BMI270 *>(
-        [](BMI270 *self)
+    auto temp_ctrl = LibXR::Timer::CreateTask<BMI270*>(
+        [](BMI270* self)
         {
           float d = self->pid_heat_.Calculate(self->target_temperature_,
                                               self->temperature_, 0.001f);
@@ -230,7 +201,7 @@ class BMI270 : public LibXR::Application
   }
 
   // SPI 连续写寄存器
-  void WriteBurst(uint8_t reg, const uint8_t *data, size_t len)
+  void WriteBurst(uint8_t reg, const uint8_t* data, size_t len)
   {
     cs_->Write(false);
     spi_->MemWrite(reg, LibXR::ConstRawData(data, len), op_spi_);
@@ -294,7 +265,7 @@ class BMI270 : public LibXR::Application
     return false;
   }
 
-  void OnMonitor() override
+  void OnMonitor()
   {
     if (!std::isfinite(gyro_data_.x()) || !std::isfinite(gyro_data_.y()) ||
         !std::isfinite(gyro_data_.z()) || !std::isfinite(accl_data_.x()) ||
@@ -305,8 +276,7 @@ class BMI270 : public LibXR::Application
     float ideal_dt = IdealDt();
     if (ideal_dt > 0.0f && std::fabs(dt_.ToSecondf() - ideal_dt) > 0.00015f)
     {
-      XR_LOG_WARN("BMI270 dt_us=%u",
-                  static_cast<unsigned>(dt_.ToMicrosecond()));
+      XR_LOG_WARN("BMI270 dt_us=%u", static_cast<unsigned>(dt_.ToMicrosecond()));
     }
   }
 
@@ -374,7 +344,7 @@ class BMI270 : public LibXR::Application
   }
 
   // 采样线程：等待 data ready 事件，读取一帧 IMU 数据并发布
-  static void ThreadFunc(BMI270 *self)
+  static void ThreadFunc(BMI270* self)
   {
     self->pwm_->SetConfig({30000});
     self->pwm_->SetDutyCycle(0);
@@ -425,7 +395,7 @@ class BMI270 : public LibXR::Application
   }
 
   // 读多个连续寄存器：out[0] 为 dummy，真正数据从 out[1] 开始
-  void ReadBurst(uint8_t reg, uint8_t *out, uint8_t len)
+  void ReadBurst(uint8_t reg, uint8_t* out, uint8_t len)
   {
     cs_->Write(false);
     spi_->MemRead(reg, {out, len}, op_spi_);
@@ -551,7 +521,7 @@ class BMI270 : public LibXR::Application
   }
 
   // 命令行接口：show / list_offset / cali
-  static int CommandFunc(BMI270 *self, int argc, char **argv)
+  static int CommandFunc(BMI270* self, int argc, char** argv)
   {
     if (argc == 1)
     {
@@ -566,8 +536,8 @@ class BMI270 : public LibXR::Application
       if (strcmp(argv[1], "list_offset") == 0)
       {
         LibXR::STDIO::Printf<"bias: %f %f %f\r\n">(self->gyro_bias_key_.data_.x(),
-                             self->gyro_bias_key_.data_.y(),
-                             self->gyro_bias_key_.data_.z());
+                                                   self->gyro_bias_key_.data_.y(),
+                                                   self->gyro_bias_key_.data_.z());
         return 0;
       }
       else if (strcmp(argv[1], "cali") == 0)
@@ -578,7 +548,8 @@ class BMI270 : public LibXR::Application
         self->cali_counter_ = 0;
         self->in_cali_ = true;
 
-        LibXR::STDIO::Printf<"Starting BMI270 gyroscope calibration. Please "
+        LibXR::STDIO::Printf<
+            "Starting BMI270 gyroscope calibration. Please "
             "keep the device steady.\r\n">();
 
         // 给用户一点时间把设备放稳
@@ -618,9 +589,8 @@ class BMI270 : public LibXR::Application
         // NOLINTEND
 
         LibXR::STDIO::Printf<"\r\nBMI270 calibration result - x: %f, y: %f, z: %f\r\n">(
-                             self->gyro_bias_key_.data_.x(),
-                             self->gyro_bias_key_.data_.y(),
-                             self->gyro_bias_key_.data_.z());
+            self->gyro_bias_key_.data_.x(), self->gyro_bias_key_.data_.y(),
+            self->gyro_bias_key_.data_.z());
 
         LibXR::STDIO::Printf<"Analyzing calibration quality...\r\n">();
 
@@ -651,7 +621,7 @@ class BMI270 : public LibXR::Application
         double err_z = avg_z2 - self->gyro_bias_key_.data_.z();
 
         LibXR::STDIO::Printf<"\r\nBMI270 calibration error - x: %f, y: %f, z: %f\r\n">(
-                             err_x, err_y, err_z);
+            err_x, err_y, err_z);
 
         // 存进数据库
         self->gyro_bias_key_.Set(self->gyro_bias_key_.data_);
@@ -666,9 +636,10 @@ class BMI270 : public LibXR::Application
       delay = std::clamp(delay, 2, 1000);
       while (time > 0)
       {
-        LibXR::STDIO::Printf<"acc:%+5f %+5f %+5f | gyr:%+5f %+5f %+5f | T:%4.2f\r\n">(self->accl_data_.x(),
-            self->accl_data_.y(), self->accl_data_.z(), self->gyro_data_.x(),
-            self->gyro_data_.y(), self->gyro_data_.z(), self->temperature_);
+        LibXR::STDIO::Printf<"acc:%+5f %+5f %+5f | gyr:%+5f %+5f %+5f | T:%4.2f\r\n">(
+            self->accl_data_.x(), self->accl_data_.y(), self->accl_data_.z(),
+            self->gyro_data_.x(), self->gyro_data_.y(), self->gyro_data_.z(),
+            self->temperature_);
         LibXR::Thread::Sleep(delay);
         time -= delay;
       }
@@ -698,10 +669,10 @@ class BMI270 : public LibXR::Application
 
   LibXR::Topic topic_gyro_, topic_accl_;
 
-  LibXR::GPIO *cs_ = nullptr;
-  LibXR::GPIO *int1_ = nullptr;
-  LibXR::SPI *spi_ = nullptr;
-  LibXR::PWM *pwm_ = nullptr;
+  LibXR::GPIO* cs_ = nullptr;
+  LibXR::GPIO* int1_ = nullptr;
+  LibXR::SPI* spi_ = nullptr;
+  LibXR::PWM* pwm_ = nullptr;
 
   LibXR::Semaphore sem_spi_, new_data_;
   LibXR::SPI::OperationRW op_spi_;
