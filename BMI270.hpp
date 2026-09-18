@@ -126,35 +126,51 @@ class BMI270
     // 0x03 保留
   };
 
-  BMI270(LibXR::GPIO& external_cs_name, LibXR::GPIO& external_int1_name,
-         LibXR::SPI& external_spi_name, LibXR::PWM& external_pwm_name,
-         LibXR::Database& external_database, LibXR::RamFS& external_ramfs,
-         DataRateGyro gyro_datarate, DataRateAccel accel_datarate, AcclRange accl_range,
-         GyroRange gyro_range, AcclFilterBwp accl_bwp, GyroFilterBwp gyro_bwp,
-         LibXR::Quaternion<float>&& rotation, LibXR::PID<float>::Param pid_param,
-         const char* gyro_topic_name, const char* accl_topic_name,
-         float target_temperature, size_t task_stack_depth)
-      : data_rate_gyro_(gyro_datarate),
-        data_rate_accel_(accel_datarate),
-        accl_range_(accl_range),
-        gyro_range_(gyro_range),
-        accl_bwp_(accl_bwp),
-        gyro_bwp_(gyro_bwp),
-        rotation_(std::move(rotation)),
-        pid_heat_(pid_param),
-        target_temperature_(target_temperature),
-        topic_gyro_(LibXR::Topic::CreateTopic<decltype(gyro_data_)>(gyro_topic_name)),
-        topic_accl_(LibXR::Topic::CreateTopic<decltype(accl_data_)>(accl_topic_name)),
-        cs_(std::addressof(external_cs_name)),
-        int1_(std::addressof(external_int1_name)),
-        spi_(std::addressof(external_spi_name)),
-        pwm_(std::addressof(external_pwm_name)),
+  struct Param
+  {
+    DataRateGyro gyro_datarate;
+    DataRateAccel accel_datarate;
+    AcclRange accl_range;
+    GyroRange gyro_range;
+    AcclFilterBwp accl_bwp;
+    GyroFilterBwp gyro_bwp;
+    LibXR::Quaternion<float> rotation;
+    LibXR::PID<float>::Param pid_param;
+    const char* gyro_topic_name;
+    const char* accl_topic_name;
+    float target_temperature;
+    size_t task_stack_depth;
+  };
+
+  BMI270(
+      LibXR::GPIO& cs,
+      LibXR::GPIO& int1,
+      LibXR::SPI& spi,
+      LibXR::PWM& pwm,
+      LibXR::Database& database,
+      LibXR::RamFS& ramfs,
+      const Param& param = {.gyro_datarate = BMI270::DataRateGyro::DATA_RATE_800HZ, .accel_datarate = BMI270::DataRateAccel::DATA_RATE_800HZ, .accl_range = BMI270::AcclRange::RANGE_8G, .gyro_range = BMI270::GyroRange::DPS_2000, .accl_bwp = BMI270::AcclFilterBwp::NORMAL, .gyro_bwp = BMI270::GyroFilterBwp::NORMAL, .rotation = {1.0f, 0.0f, 0.0f, 0.0f}, .pid_param = {.k = 0.2f, .p = 1.0f, .i = 0.1f, .d = 0.0f, .i_limit = 0.3f, .out_limit = 1.0f, .cycle = false}, .gyro_topic_name = "bmi270_gyro", .accl_topic_name = "bmi270_accl", .target_temperature = 45.0f, .task_stack_depth = 512})
+      : data_rate_gyro_(param.gyro_datarate),
+        data_rate_accel_(param.accel_datarate),
+        accl_range_(param.accl_range),
+        gyro_range_(param.gyro_range),
+        accl_bwp_(param.accl_bwp),
+        gyro_bwp_(param.gyro_bwp),
+        rotation_(std::move(param.rotation)),
+        pid_heat_(param.pid_param),
+        target_temperature_(param.target_temperature),
+        topic_gyro_(LibXR::Topic::CreateTopic<decltype(gyro_data_)>(param.gyro_topic_name)),
+        topic_accl_(LibXR::Topic::CreateTopic<decltype(accl_data_)>(param.accl_topic_name)),
+        cs_(std::addressof(cs)),
+        int1_(std::addressof(int1)),
+        spi_(std::addressof(spi)),
+        pwm_(std::addressof(pwm)),
         op_spi_(sem_spi_),
         cmd_file_(LibXR::RamFS::CreateFile("bmi270", CommandFunc, this)),
-        gyro_bias_key_(external_database, "bmi270_gyro_bias",
+        gyro_bias_key_(database, "bmi270_gyro_bias",
                        Eigen::Matrix<float, 3, 1>(0.0f, 0.0f, 0.0f))
   {
-    external_ramfs.Add(cmd_file_);
+    ramfs.Add(cmd_file_);
 
     // 配置数据就绪中断引脚
     int1_->DisableInterrupt();
@@ -184,7 +200,7 @@ class BMI270
     }
 
     // 采样线程：最高优先级实时线程
-    thread_.Create(this, ThreadFunc, "bmi270_thread", task_stack_depth,
+    thread_.Create(this, ThreadFunc, "bmi270_thread", param.task_stack_depth,
                    LibXR::Thread::Priority::REALTIME);
 
     // 温控 PID 定时任务（加热 PWM）
