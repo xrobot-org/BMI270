@@ -216,14 +216,26 @@ class BMI270
    * @param param 配置参数。
    *              Configuration parameters.
    */
-  BMI270(
-      LibXR::GPIO& cs,
-      LibXR::GPIO& int1,
-      LibXR::SPI& spi,
-      LibXR::PWM& pwm,
-      LibXR::Database& database,
-      LibXR::RamFS& ramfs,
-      const Param& param = {.gyro_datarate = BMI270::DataRateGyro::DATA_RATE_800HZ, .accel_datarate = BMI270::DataRateAccel::DATA_RATE_800HZ, .accl_range = BMI270::AcclRange::RANGE_8G, .gyro_range = BMI270::GyroRange::DPS_2000, .accl_bwp = BMI270::AcclFilterBwp::NORMAL, .gyro_bwp = BMI270::GyroFilterBwp::NORMAL, .rotation = {1.0f, 0.0f, 0.0f, 0.0f}, .pid_param = {.k = 0.2f, .p = 1.0f, .i = 0.1f, .d = 0.0f, .i_limit = 0.3f, .out_limit = 1.0f, .cycle = false}, .gyro_topic_name = "bmi270_gyro", .accl_topic_name = "bmi270_accl", .target_temperature = 45.0f, .task_stack_depth = 512})
+  BMI270(LibXR::GPIO& cs, LibXR::GPIO& int1, LibXR::SPI& spi, LibXR::PWM& pwm,
+         LibXR::Database& database, LibXR::RamFS& ramfs,
+         const Param& param = {.gyro_datarate = BMI270::DataRateGyro::DATA_RATE_800HZ,
+                               .accel_datarate = BMI270::DataRateAccel::DATA_RATE_800HZ,
+                               .accl_range = BMI270::AcclRange::RANGE_8G,
+                               .gyro_range = BMI270::GyroRange::DPS_2000,
+                               .accl_bwp = BMI270::AcclFilterBwp::NORMAL,
+                               .gyro_bwp = BMI270::GyroFilterBwp::NORMAL,
+                               .rotation = {1.0f, 0.0f, 0.0f, 0.0f},
+                               .pid_param = {.k = 0.2f,
+                                             .p = 1.0f,
+                                             .i = 0.1f,
+                                             .d = 0.0f,
+                                             .i_limit = 0.3f,
+                                             .out_limit = 1.0f,
+                                             .cycle = false},
+                               .gyro_topic_name = "bmi270_gyro",
+                               .accl_topic_name = "bmi270_accl",
+                               .target_temperature = 45.0f,
+                               .task_stack_depth = 512})
       : data_rate_gyro_(param.gyro_datarate),
         data_rate_accel_(param.accel_datarate),
         accl_range_(param.accl_range),
@@ -233,8 +245,10 @@ class BMI270
         rotation_(std::move(param.rotation)),
         pid_heat_(param.pid_param),
         target_temperature_(param.target_temperature),
-        topic_gyro_(LibXR::Topic::CreateTopic<decltype(gyro_data_)>(param.gyro_topic_name)),
-        topic_accl_(LibXR::Topic::CreateTopic<decltype(accl_data_)>(param.accl_topic_name)),
+        topic_gyro_(
+            LibXR::Topic::CreateTopic<decltype(gyro_data_)>(param.gyro_topic_name)),
+        topic_accl_(
+            LibXR::Topic::CreateTopic<decltype(accl_data_)>(param.accl_topic_name)),
         cs_(std::addressof(cs)),
         int1_(std::addressof(int1)),
         spi_(std::addressof(spi)),
@@ -460,7 +474,7 @@ class BMI270
   // 采样线程：等待 data ready 事件，读取一帧 IMU 数据并发布
   static void ThreadFunc(BMI270* self)
   {
-    self->pwm_->SetConfig({30000});
+    self->pwm_->SetConfig({.frequency = 30000});
     self->pwm_->SetDutyCycle(0);
     self->pwm_->Enable();
 
