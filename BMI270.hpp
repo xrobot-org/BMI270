@@ -281,7 +281,7 @@ class BMI270
     // 初始化失败则软复位后重试
     while (!Init())
     {
-      WriteSingle(REG_CMD, CMD_SOFTRESET);
+      WriteNoVerify(REG_CMD, CMD_SOFTRESET);
       LibXR::Thread::Sleep(100);
       ReadSingle(REG_CHIP_ID);
       LibXR::Thread::Sleep(10);
@@ -501,14 +501,20 @@ class BMI270
     }
   }
 
+  // 写单个寄存器，不回读（用于只写寄存器，如 REG_CMD）
+  void WriteNoVerify(uint8_t reg, uint8_t data)
+  {
+    cs_->Write(false);
+    spi_->MemWrite(reg, data, op_spi_);
+    cs_->Write(true);
+  }
+
   // 写单个寄存器，并回读确认写入成功
   void WriteSingle(uint8_t reg, uint8_t data)
   {
     do
     {
-      cs_->Write(false);
-      spi_->MemWrite(reg, data, op_spi_);
-      cs_->Write(true);
+      WriteNoVerify(reg, data);
     } while (ReadSingle(reg) != data);
   }
 
