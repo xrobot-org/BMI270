@@ -24,14 +24,23 @@ depends: []
 #include "thread.hpp"
 #include "transform.hpp"
 
+/**
+ * @brief BMI270 6 轴 IMU 驱动模块，负责初始化、数据采集、温控与 Topic 发布。
+ *        Driver Module for the BMI270 6-axis IMU: initialization, data acquisition,
+ *        temperature control and Topic publishing.
+ */
 class BMI270
 {
  public:
+  /// @name 寄存器地址 Register addresses
+  /// @{
   static constexpr uint8_t REG_CHIP_ID = 0x00;
-  static constexpr uint8_t REG_INT_STATUS_1 =
-      0x1D;  // [7] = 加速度 DRDY, [6] = 陀螺仪 DRDY
-  static constexpr uint8_t REG_DATA_START =
-      0x0C;  // 从此地址开始：6 字节加速度 + 6 字节陀螺仪
+  /// bit7 加速度计 DRDY，bit6 陀螺仪 DRDY
+  /// bit7 accelerometer DRDY, bit6 gyroscope DRDY
+  static constexpr uint8_t REG_INT_STATUS_1 = 0x1D;
+  /// 数据区起点：6 字节加速度 + 6 字节角速度
+  /// Data start: 6 bytes of acceleration + 6 bytes of angular velocity
+  static constexpr uint8_t REG_DATA_START = 0x0C;
   static constexpr uint8_t REG_TEMP_0 = 0x22;
   static constexpr uint8_t REG_TEMP_1 = 0x23;
   static constexpr uint8_t REG_ACC_CONF = 0x40;
@@ -50,98 +59,163 @@ class BMI270
   static constexpr uint8_t REG_INIT_ADDR_0 = 0x5B;
   static constexpr uint8_t REG_INIT_ADDR_1 = 0x5C;
   static constexpr uint8_t REG_INIT_DATA = 0x5E;
+  /// @}
 
-  static constexpr uint8_t CMD_SOFTRESET = 0xB6;
+  static constexpr uint8_t CMD_SOFTRESET = 0xB6;  ///< 写入 REG_CMD 触发软复位
+                                                  ///< Written to REG_CMD to soft-reset
+  /// 角度到弧度的换算系数 (rad/deg)
+  /// Degree-to-radian factor (rad/deg)
   static constexpr float DEG2RAD = 0.01745329251f;
 
-  // 一次 burst 读取的有效寄存器字节数（不含第 1 个 dummy 字节）
+  /// 一次 burst 读取的有效寄存器字节数（不含第 1 个 dummy 字节）
+  /// Number of valid register bytes in one burst read (excluding the first dummy byte)
   static constexpr size_t SPI_READ_SIZE = REG_TEMP_1 - REG_DATA_START + 1;
 
+  /// Bosch 官方配置文件，定义于 BMI270.cpp
+  /// Official Bosch configuration file, defined in BMI270.cpp
   static const uint8_t BMI270_CONFIG_FILE[8192];  // NOLINT
 
-  // 加速度 ODR 枚举，对应 ACC_CONF[3:0]
+  /**
+   * @brief 加速度计 ODR，对应 ACC_CONF[3:0]。
+   *        Accelerometer ODR, maps to ACC_CONF[3:0].
+   */
   enum class DataRateAccel : uint8_t
   {
-    DATA_RATE_0_78HZ = 0x01,
-    DATA_RATE_1_56HZ = 0x02,
-    DATA_RATE_3_12HZ = 0x03,
-    DATA_RATE_6_25HZ = 0x04,
-    DATA_RATE_12_5HZ = 0x05,
-    DATA_RATE_25HZ = 0x06,
-    DATA_RATE_50HZ = 0x07,
-    DATA_RATE_100HZ = 0x08,
-    DATA_RATE_200HZ = 0x09,
-    DATA_RATE_400HZ = 0x0A,
-    DATA_RATE_800HZ = 0x0B,
-    DATA_RATE_1600HZ = 0x0C,
+    DATA_RATE_0_78HZ = 0x01,  ///< 0.78 Hz
+    DATA_RATE_1_56HZ = 0x02,  ///< 1.56 Hz
+    DATA_RATE_3_12HZ = 0x03,  ///< 3.12 Hz
+    DATA_RATE_6_25HZ = 0x04,  ///< 6.25 Hz
+    DATA_RATE_12_5HZ = 0x05,  ///< 12.5 Hz
+    DATA_RATE_25HZ = 0x06,    ///< 25 Hz
+    DATA_RATE_50HZ = 0x07,    ///< 50 Hz
+    DATA_RATE_100HZ = 0x08,   ///< 100 Hz
+    DATA_RATE_200HZ = 0x09,   ///< 200 Hz
+    DATA_RATE_400HZ = 0x0A,   ///< 400 Hz
+    DATA_RATE_800HZ = 0x0B,   ///< 800 Hz
+    DATA_RATE_1600HZ = 0x0C,  ///< 1600 Hz
   };
 
-  // 陀螺仪 ODR 枚举，对应 GYR_CONF[3:0]
+  /**
+   * @brief 陀螺仪 ODR，对应 GYR_CONF[3:0]。
+   *        Gyroscope ODR, maps to GYR_CONF[3:0].
+   */
   enum class DataRateGyro : uint8_t
   {
-    DATA_RATE_25HZ = 0x06,
-    DATA_RATE_50HZ = 0x07,
-    DATA_RATE_100HZ = 0x08,
-    DATA_RATE_200HZ = 0x09,
-    DATA_RATE_400HZ = 0x0A,
-    DATA_RATE_800HZ = 0x0B,
-    DATA_RATE_1600HZ = 0x0C,
-    DATA_RATE_3200HZ = 0x0D,
+    DATA_RATE_25HZ = 0x06,    ///< 25 Hz
+    DATA_RATE_50HZ = 0x07,    ///< 50 Hz
+    DATA_RATE_100HZ = 0x08,   ///< 100 Hz
+    DATA_RATE_200HZ = 0x09,   ///< 200 Hz
+    DATA_RATE_400HZ = 0x0A,   ///< 400 Hz
+    DATA_RATE_800HZ = 0x0B,   ///< 800 Hz
+    DATA_RATE_1600HZ = 0x0C,  ///< 1600 Hz
+    DATA_RATE_3200HZ = 0x0D,  ///< 3200 Hz
   };
 
-  // 陀螺仪量程，对应 GYR_RANGE
+  /**
+   * @brief 陀螺仪量程，对应 GYR_RANGE。
+   *        Gyroscope range, maps to GYR_RANGE.
+   */
   typedef enum : uint8_t
   {
-    DPS_2000 = 0x00,
-    DPS_1000 = 0x01,
-    DPS_500 = 0x02,
-    DPS_250 = 0x03,
-    DPS_125 = 0x04,
+    DPS_2000 = 0x00,  ///< ±2000 dps
+    DPS_1000 = 0x01,  ///< ±1000 dps
+    DPS_500 = 0x02,   ///< ±500 dps
+    DPS_250 = 0x03,   ///< ±250 dps
+    DPS_125 = 0x04,   ///< ±125 dps
   } GyroRange;
 
-  // 加速度量程，对应 ACC_RANGE
+  /**
+   * @brief 加速度计量程，对应 ACC_RANGE。
+   *        Accelerometer range, maps to ACC_RANGE.
+   */
   typedef enum : uint8_t
   {
-    RANGE_2G = 0x00,
-    RANGE_4G = 0x01,
-    RANGE_8G = 0x02,
-    RANGE_16G = 0x03,
+    RANGE_2G = 0x00,   ///< ±2 g
+    RANGE_4G = 0x01,   ///< ±4 g
+    RANGE_8G = 0x02,   ///< ±8 g
+    RANGE_16G = 0x03,  ///< ±16 g
   } AcclRange;
 
-  // 加速度带宽 / 滤波器配置，对应 ACC_CONF[6:4]（filter_perf=1 高性能模式）
+  /**
+   * @brief 加速度计滤波带宽，对应 ACC_CONF[6:4]（filter_perf = 1 高性能模式）。
+   *        Accelerometer filter bandwidth, maps to ACC_CONF[6:4] (filter_perf = 1,
+   *        high-performance mode).
+   */
   enum class AcclFilterBwp : uint8_t
   {
-    OSR4 = 0x00,    // OSR4，带宽最窄，抗 aliasing 最好，延时最大
-    OSR2 = 0x01,    // OSR2
-    NORMAL = 0x02,  // Normal 模式，带宽较宽、延时较小（默认）
-    CIC = 0x03,     // CIC 模式
+    OSR4 = 0x00,    ///< OSR4：带宽最窄，抗混叠最好，延时最大
+                    ///< OSR4: narrowest bandwidth, best anti-aliasing, longest delay
+    OSR2 = 0x01,    ///< OSR2
+    NORMAL = 0x02,  ///< Normal：带宽较宽，延时较小
+                    ///< Normal: wider bandwidth, shorter delay
+    CIC = 0x03,     ///< CIC 模式
+                    ///< CIC mode
   };
 
-  // 陀螺仪带宽 / 滤波器配置，对应 GYR_CONF[5:4]
+  /**
+   * @brief 陀螺仪滤波带宽，对应 GYR_CONF[5:4]。
+   *        Gyroscope filter bandwidth, maps to GYR_CONF[5:4].
+   */
   enum class GyroFilterBwp : uint8_t
   {
-    OSR4 = 0x00,    // OSR4
-    OSR2 = 0x01,    // OSR2
-    NORMAL = 0x02,  // Normal 模式（默认）
-    // 0x03 保留
+    OSR4 = 0x00,    ///< OSR4
+    OSR2 = 0x01,    ///< OSR2
+    NORMAL = 0x02,  ///< Normal 模式
+                    ///< Normal mode
   };
 
+  /**
+   * @brief BMI270 配置参数。
+   *        BMI270 configuration parameters.
+   */
   struct Param
   {
-    DataRateGyro gyro_datarate;
-    DataRateAccel accel_datarate;
-    AcclRange accl_range;
-    GyroRange gyro_range;
-    AcclFilterBwp accl_bwp;
-    GyroFilterBwp gyro_bwp;
-    LibXR::Quaternion<float> rotation;
-    LibXR::PID<float>::Param pid_param;
-    const char* gyro_topic_name;
-    const char* accl_topic_name;
-    float target_temperature;
-    size_t task_stack_depth;
+    DataRateGyro gyro_datarate;         ///< 陀螺仪 ODR
+                                        ///< Gyroscope ODR
+    DataRateAccel accel_datarate;       ///< 加速度计 ODR
+                                        ///< Accelerometer ODR
+    AcclRange accl_range;               ///< 加速度计量程
+                                        ///< Accelerometer range
+    GyroRange gyro_range;               ///< 陀螺仪量程
+                                        ///< Gyroscope range
+    AcclFilterBwp accl_bwp;             ///< 加速度计滤波带宽
+                                        ///< Accelerometer filter bandwidth
+    GyroFilterBwp gyro_bwp;             ///< 陀螺仪滤波带宽
+                                        ///< Gyroscope filter bandwidth
+    LibXR::Quaternion<float> rotation;  ///< 传感器到应用坐标系的四元数 (w, x, y, z)
+    ///< Quaternion (w, x, y, z), sensor to application frame
+    LibXR::PID<float>::Param pid_param;  ///< 温控 PID，输出为 PWM 占空比 (0.0-1.0)
+    ///< Temperature PID, output is the PWM duty cycle (0.0-1.0)
+    const char* gyro_topic_name;  ///< 陀螺仪 Topic 名称
+    ///< Gyroscope Topic name
+    const char* accl_topic_name;  ///< 加速度计 Topic 名称
+    ///< Accelerometer Topic name
+    float target_temperature;  ///< 目标温度 (°C)
+    ///< Target temperature (°C)
+    size_t task_stack_depth;  ///< 采样线程栈深
+    ///< Sampling thread stack depth
   };
 
+  /**
+   * @brief 构造 BMI270：注册中断与 RamFS 命令，初始化传感器，创建采样线程与温控任务。
+   *        Construct BMI270: register the interrupt and the RamFS command, initialize the
+   *        sensor, and create the sampling thread and the temperature-control task.
+   *
+   * @param cs 片选 GPIO。
+   *           Chip-select GPIO.
+   * @param int1 INT1 数据就绪中断 GPIO。
+   *             INT1 data-ready interrupt GPIO.
+   * @param spi 连接 BMI270 的 SPI。
+   *            SPI connected to the BMI270.
+   * @param pwm 加热片的 PWM。
+   *            PWM of the heating element.
+   * @param database 保存陀螺仪零偏的 Database。
+   *                 Database that stores the gyroscope zero offset.
+   * @param ramfs 接收 `bmi270` 命令的 RamFS。
+   *              RamFS that receives the `bmi270` command.
+   * @param param 配置参数。
+   *              Configuration parameters.
+   */
   BMI270(
       LibXR::GPIO& cs,
       LibXR::GPIO& int1,
@@ -216,7 +290,17 @@ class BMI270
     LibXR::Timer::Start(temp_ctrl);
   }
 
-  // SPI 连续写寄存器
+  /**
+   * @brief 连续写寄存器，写入期间拉低片选。
+   *        Write consecutive registers with the chip select asserted.
+   *
+   * @param reg 起始寄存器地址。
+   *            Start register address.
+   * @param data 写入数据。
+   *             Data to write.
+   * @param len 数据长度，单位字节。
+   *            Data length in bytes.
+   */
   void WriteBurst(uint8_t reg, const uint8_t* data, size_t len)
   {
     cs_->Write(false);
@@ -224,7 +308,14 @@ class BMI270
     cs_->Write(true);
   }
 
-  // 加载官方配置文件到 BMI270 内部配置区域
+  /**
+   * @brief 把官方配置文件加载到 BMI270 内部配置区域，并等待 INTERNAL_STATUS 报告完成。
+   *        Load the official configuration file into the BMI270 internal configuration
+   *        area and wait for INTERNAL_STATUS to report completion.
+   *
+   * @return 20 ms 内加载完成返回 true，否则返回 false。
+   *         True when loading completes within 20 ms, false otherwise.
+   */
   bool LoadConfigFile()
   {
     // 1) INIT_CTRL = 0x00，准备加载配置
@@ -281,6 +372,13 @@ class BMI270
     return false;
   }
 
+  /**
+   * @brief 监控回调：数据不是有限值时输出警告；中断间隔偏离 ODR 理想周期超过 150 us
+   *        时输出实际间隔。
+   *        Monitor callback: log a warning when the data is not finite, and log the
+   *        actual interval when the interrupt interval deviates from the ideal ODR
+   *        period by more than 150 us.
+   */
   void OnMonitor()
   {
     if (!std::isfinite(gyro_data_.x()) || !std::isfinite(gyro_data_.y()) ||
