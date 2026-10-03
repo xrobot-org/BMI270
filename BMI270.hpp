@@ -2,7 +2,7 @@
 
 // clang-format off
 /* === MODULE MANIFEST V2 ===
-module_description: Bosch BMI270 六轴 IMU 传感器模块 / Bosch BMI270 6-axis IMU Driver
+module_description: 博世 BMI270 6 轴 IMU（SPI）驱动模块 / Driver Module for the Bosch BMI270 6-axis IMU over SPI
 depends: []
 === END MANIFEST === */
 // clang-format on
@@ -229,10 +229,10 @@ class BMI270
   {
     // 1) INIT_CTRL = 0x00，准备加载配置
     WriteSingle(REG_INIT_CTRL, 0x00);
-    // 官方建议有一个最小延时，这里给 1ms
+    // 最小延时取 1 ms
     LibXR::Thread::Sleep(1);
 
-    constexpr size_t CHUNK = 32;  // 每次写 32 字节，相比 4 字节效率更高
+    constexpr size_t CHUNK = 32;  // 每次写 32 字节
     constexpr size_t TOTAL = sizeof(BMI270_CONFIG_FILE);
     size_t off = 0;
 
@@ -307,7 +307,7 @@ class BMI270
     pwr_conf &= ~0x01u;  // adv_power_save = 0
     WriteSingle(REG_PWR_CONF, pwr_conf);
 
-    // 3) 等待 ≥ 450us，这里取 1ms 留裕量
+    // 3) 等待不少于 450 us，取 1 ms
     LibXR::Thread::Sleep(1);
 
     // 4) 再读一次 CHIP_ID 确认通信正常
@@ -371,7 +371,7 @@ class BMI270
       bool got = (self->new_data_.Wait(100) == LibXR::ErrorCode::OK);
       if (!got)
       {
-        // 如果信号丢失，主动读取一次中断状态，避免卡死
+        // 超时未收到中断时，读取中断状态确认陀螺仪 data-ready
         uint8_t ist = self->ReadSingle(REG_INT_STATUS_1);
         if (ist & 0x40)
         {
@@ -568,7 +568,7 @@ class BMI270
             "Starting BMI270 gyroscope calibration. Please "
             "keep the device steady.\r\n">();
 
-        // 给用户一点时间把设备放稳
+        // 等待设备放稳
         LibXR::Thread::Sleep(3000);
 
         // 采集 60 秒数据
@@ -624,7 +624,7 @@ class BMI270
         self->in_cali_ = false;
         LibXR::Thread::Sleep(1000);
 
-        // 再算一次平均 raw，换算为 rad/s（此时应该接近刚刚求出的偏置）
+        // 再算一次平均 raw，换算为 rad/s，结果应接近上一步求出的偏置
         double avg_x2 = static_cast<double>(self->gyro_cali_.data()[0]) /
                         static_cast<double>(self->cali_counter_) * s * DEG2RAD;
         double avg_y2 = static_cast<double>(self->gyro_cali_.data()[1]) /
@@ -639,7 +639,7 @@ class BMI270
         LibXR::STDIO::Printf<"\r\nBMI270 calibration error - x: %f, y: %f, z: %f\r\n">(
             err_x, err_y, err_z);
 
-        // 存进数据库
+        // 写入 Database
         self->gyro_bias_key_.Set(self->gyro_bias_key_.data_);
         LibXR::STDIO::Printf<"BMI270 calibration data saved.\r\n">();
         return 0;
