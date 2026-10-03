@@ -197,9 +197,11 @@ class BMI270
   };
 
   /**
-   * @brief 构造 BMI270：注册中断与 RamFS 命令，初始化传感器，创建采样线程与温控任务。
+   * @brief 构造 BMI270：注册中断与 RamFS 命令，初始化传感器，配置加热 PWM，
+   *        创建采样线程与温控任务。
    *        Construct BMI270: register the interrupt and the RamFS command, initialize the
-   *        sensor, and create the sampling thread and the temperature-control task.
+   *        sensor, configure the heater PWM, and create the sampling thread and the
+   *        temperature-control task.
    *
    * @param cs 片选 GPIO。
    *           Chip-select GPIO.
@@ -286,6 +288,11 @@ class BMI270
       ReadSingle(REG_CHIP_ID);
       LibXR::Thread::Sleep(10);
     }
+
+    // 加热 PWM 须在采样线程与温控任务创建之前配置完成
+    pwm_->SetConfig({.frequency = 30000});
+    pwm_->SetDutyCycle(0);
+    pwm_->Enable();
 
     // 采样线程：最高优先级实时线程
     thread_.Create(this, ThreadFunc, "bmi270_thread", param.task_stack_depth,
@@ -474,10 +481,6 @@ class BMI270
   // 采样线程：等待 data ready 事件，读取一帧 IMU 数据并发布
   static void ThreadFunc(BMI270* self)
   {
-    self->pwm_->SetConfig({.frequency = 30000});
-    self->pwm_->SetDutyCycle(0);
-    self->pwm_->Enable();
-
     while (true)
     {
       bool got = (self->new_data_.Wait(100) == LibXR::ErrorCode::OK);

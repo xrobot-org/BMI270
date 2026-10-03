@@ -8,7 +8,7 @@
 
 采样线程 `bmi270_thread`（REALTIME 优先级）等待 data-ready 中断；100 ms 内没有中断时读取 `INT_STATUS_1`，陀螺仪 data-ready 置位则照常读取。每次以一个 burst 读出加速度、角速度和温度，换算后发布。加速度单位为 g，乘以 `rotation`；角速度单位为 rad/s，先减去零偏再乘以 `rotation`。温度为 `23 + raw / 512`（°C），原始值 `0x8000` 视为无效（NaN）。
 
-加热 PWM 以 30 kHz 运行；一个周期 1 ms 的 LibXR 定时器任务用 `pid_param` 计算占空比，限制在 0 到 1，使温度趋近 `target_temperature`。
+初始化成功后，构造函数先把加热 PWM 配置为 30 kHz、占空比 0 并使能，再创建采样线程与一个周期 1 ms 的 LibXR 定时器任务；该任务用 `pid_param` 计算占空比，限制在 0 到 1，使温度趋近 `target_temperature`。
 
 陀螺仪零偏（rad/s）保存在 Database 的键 `bmi270_gyro_bias`（`Eigen::Matrix<float, 3, 1>`）中。
 
@@ -25,7 +25,7 @@ Upon construction, BMI270 configures the INT1 pin as a rising-edge interrupt (pu
 
 The sampling thread `bmi270_thread` (REALTIME priority) waits for the data-ready interrupt; when no interrupt arrives within 100 ms, it reads `INT_STATUS_1`, and a set gyroscope data-ready bit is handled as usual. Each time one burst reads the acceleration, angular velocity and temperature, and the converted values are published. The acceleration unit is g, multiplied by `rotation`; the angular velocity unit is rad/s, with the zero offset subtracted before the multiplication by `rotation`. The temperature is `23 + raw / 512` (°C), and the raw value `0x8000` is treated as invalid (NaN).
 
-The heater PWM runs at 30 kHz; a LibXR timer task with a 1 ms period computes the duty cycle with `pid_param`, limits it to 0 to 1, and drives the temperature toward `target_temperature`.
+After a successful initialization, the constructor first configures the heater PWM to 30 kHz with a duty cycle of 0 and enables it, then creates the sampling thread and a LibXR timer task with a 1 ms period; the task computes the duty cycle with `pid_param`, limits it to 0 to 1, and drives the temperature toward `target_temperature`.
 
 The gyroscope zero offset (rad/s) is stored in the Database under the key `bmi270_gyro_bias` (`Eigen::Matrix<float, 3, 1>`).
 
