@@ -4,7 +4,7 @@
 
 ## 1. 模块作用 / Purpose
 
-构造时，BMI270 把 INT1 引脚配置为上升沿中断（下拉），读取 `CHIP_ID` 以切换到 SPI 模式，关闭高级省电，校验芯片 ID `0x24`，加载 Bosch 官方 8 KB 配置文件，再打开加速度计与陀螺仪，并按 `Param` 写入 ODR、量程和滤波带宽（加速度计 filter_perf 为高性能；陀螺仪 filter_perf 与 noise_perf 为高性能）。INT1 设为推挽、高电平有效、非锁存，加速度计与陀螺仪的 data-ready 都映射到 INT1。任一步失败时软复位后重试，直到成功。单个寄存器写入后回读，直到读回值与写入值一致。
+构造时，BMI270 把 INT1 引脚配置为上升沿中断（下拉），读取 `CHIP_ID` 以切换到 SPI 模式，关闭高级省电，校验芯片 ID `0x24`，加载 Bosch 官方 8 KB 配置文件，再打开加速度计与陀螺仪，并按 `Param` 写入 ODR、量程和滤波带宽（加速度计 filter_perf 为高性能；陀螺仪 filter_perf 与 noise_perf 为高性能）。INT1 设为推挽、高电平有效、非锁存，加速度计与陀螺仪的 data-ready 都映射到 INT1。任一步失败时软复位后重试，直到成功。单个寄存器写入后回读，读回值与写入值不一致时重复写入，最多 10 次；仍不一致则输出 `BMI270: write verify failed` 警告并记为该步失败。
 
 采样线程 `bmi270_thread`（REALTIME 优先级）等待 data-ready 中断；100 ms 内没有中断时读取 `INT_STATUS_1`，陀螺仪 data-ready 置位则照常读取。每次以一个 burst 读出加速度、角速度和温度，换算后发布。加速度单位为 g，乘以 `rotation`；角速度单位为 rad/s，先减去零偏再乘以 `rotation`。温度为 `23 + raw / 512`（°C），原始值 `0x8000` 视为无效（NaN）。
 
@@ -21,7 +21,7 @@
 - `bmi270 list_offset`：打印当前陀螺仪零偏。
 - `bmi270 cali`：陀螺仪零偏校准，期间设备保持静止。先等待 3 s，再采集 60 s 求平均零偏，然后采集 60 s 打印残差，最后把零偏写入 Database。
 
-Upon construction, BMI270 configures the INT1 pin as a rising-edge interrupt (pull-down), reads `CHIP_ID` to switch to SPI mode, disables advanced power save, checks the chip ID `0x24`, loads the official 8 KB Bosch configuration file, then enables the accelerometer and the gyroscope and writes the ODR, range and filter bandwidth from `Param` (accelerometer filter_perf in high-performance mode; gyroscope filter_perf and noise_perf in high-performance mode). INT1 is set to push-pull, active high, non-latched, and the data-ready signals of both the accelerometer and the gyroscope are mapped to INT1. When any step fails, the sensor is soft-reset and initialization is retried until it succeeds. After each single-register write, the register is read back until the value matches the written one.
+Upon construction, BMI270 configures the INT1 pin as a rising-edge interrupt (pull-down), reads `CHIP_ID` to switch to SPI mode, disables advanced power save, checks the chip ID `0x24`, loads the official 8 KB Bosch configuration file, then enables the accelerometer and the gyroscope and writes the ODR, range and filter bandwidth from `Param` (accelerometer filter_perf in high-performance mode; gyroscope filter_perf and noise_perf in high-performance mode). INT1 is set to push-pull, active high, non-latched, and the data-ready signals of both the accelerometer and the gyroscope are mapped to INT1. When any step fails, the sensor is soft-reset and initialization is retried until it succeeds. After each single-register write, the register is read back; on a mismatch the write is repeated, up to 10 attempts in total, after which a `BMI270: write verify failed` warning is logged and the step counts as failed.
 
 The sampling thread `bmi270_thread` (REALTIME priority) waits for the data-ready interrupt; when no interrupt arrives within 100 ms, it reads `INT_STATUS_1`, and a set gyroscope data-ready bit is handled as usual. Each time one burst reads the acceleration, angular velocity and temperature, and the converted values are published. The acceleration unit is g, multiplied by `rotation`; the angular velocity unit is rad/s, with the zero offset subtracted before the multiplication by `rotation`. The temperature is `23 + raw / 512` (°C), and the raw value `0x8000` is treated as invalid (NaN).
 

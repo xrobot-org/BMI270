@@ -334,13 +334,17 @@ class BMI270
    *        Load the official configuration file into the BMI270 internal configuration
    *        area and wait for INTERNAL_STATUS to report completion.
    *
-   * @return 20 ms 内加载完成返回 true，否则返回 false。
-   *         True when loading completes within 20 ms, false otherwise.
+   * @return 寄存器写入回读一致且 20 ms 内加载完成返回 true，否则返回 false。
+   *         True when the register writes verify and loading completes within 20 ms,
+   *         false otherwise.
    */
   bool LoadConfigFile()
   {
     // 1) INIT_CTRL = 0x00，准备加载配置
-    WriteSingle(REG_INIT_CTRL, 0x00);
+    if (!WriteSingle(REG_INIT_CTRL, 0x00))
+    {
+      return false;
+    }
     // 最小延时取 1 ms
     LibXR::Thread::Sleep(1);
 
@@ -374,7 +378,10 @@ class BMI270
     }
 
     // 4) INIT_CTRL = 0x01，触发配置生效
-    WriteSingle(REG_INIT_CTRL, 0x01);
+    if (!WriteSingle(REG_INIT_CTRL, 0x01))
+    {
+      return false;
+    }
 
     // 5) 等 INTERNAL_STATUS[3:0] == 0b0001 表示配置加载完成
     auto t0 = LibXR::Timebase::GetMilliseconds();
@@ -416,6 +423,10 @@ class BMI270
   }
 
  private:
+  /// 单个寄存器写入后回读校验的最大写入次数
+  /// Maximum number of write attempts for one register with read-back verification
+  static constexpr uint8_t WRITE_VERIFY_ATTEMPTS = 10;
+
   bool Init()
   {
     // 1) SPI 模式选择：先读一次寄存器（结果丢弃），切换到 SPI 模式
@@ -424,7 +435,10 @@ class BMI270
     // 2) 关闭高级省电模式（只改 bit0，避免破坏其他位）
     uint8_t pwr_conf = ReadSingle(REG_PWR_CONF);
     pwr_conf &= ~0x01u;  // adv_power_save = 0
-    WriteSingle(REG_PWR_CONF, pwr_conf);
+    if (!WriteSingle(REG_PWR_CONF, pwr_conf))
+    {
+      return false;
+    }
 
     // 3) 等待不少于 450 us，取 1 ms
     LibXR::Thread::Sleep(1);
@@ -445,7 +459,10 @@ class BMI270
     }
 
     // 6) 打开 ACC / GYR 电源（bit[3]=GYR_EN, bit[2]=ACC_EN）
-    WriteSingle(REG_PWR_CTRL, 0x0E);
+    if (!WriteSingle(REG_PWR_CTRL, 0x0E))
+    {
+      return false;
+    }
 
     // 高性能模式：滤波性能 / 噪声性能都打开
     static constexpr uint8_t ACC_FILTER_PERF_HP = 0x80;  // ACC_CONF bit7 = 1
@@ -455,20 +472,29 @@ class BMI270
     // 7) 配置 ACC：高性能 + 指定带宽 + 用户指定 ODR
     uint8_t acc_conf = ACC_FILTER_PERF_HP | (static_cast<uint8_t>(accl_bwp_) << 4) |
                        (static_cast<uint8_t>(data_rate_accel_) & 0x0F);
-    WriteSingle(REG_ACC_CONF, acc_conf);
-    WriteSingle(REG_ACC_RANGE, static_cast<uint8_t>(accl_range_));
+    if (!WriteSingle(REG_ACC_CONF, acc_conf) ||
+        !WriteSingle(REG_ACC_RANGE, static_cast<uint8_t>(accl_range_)))
+    {
+      return false;
+    }
 
     // 8) 配置 GYR：滤波和噪声都设为高性能 + 指定带宽 + 用户指定 ODR
     uint8_t gyr_conf = GYR_FILTER_PERF_HP | GYR_NOISE_PERF_HP |
                        (static_cast<uint8_t>(gyro_bwp_) << 4) |
                        (static_cast<uint8_t>(data_rate_gyro_) & 0x0F);
-    WriteSingle(REG_GYR_CONF, gyr_conf);
-    WriteSingle(REG_GYR_RANGE, static_cast<uint8_t>(gyro_range_));
+    if (!WriteSingle(REG_GYR_CONF, gyr_conf) ||
+        !WriteSingle(REG_GYR_RANGE, static_cast<uint8_t>(gyro_range_)))
+    {
+      return false;
+    }
 
     // 9) 配置 INT1：推挽输出，高电平有效；映射加速度/陀螺仪数据就绪中断
-    WriteSingle(REG_INT1_IO_CTRL, 0x0A);  // push-pull, active high
-    WriteSingle(REG_INT_MAP_DATA, 0x44);  // gyr/acc drdy -> INT1
-    WriteSingle(REG_INT_LATCH, 0x00);     // 非锁存模式（脉冲）
+    if (!WriteSingle(REG_INT1_IO_CTRL, 0x0A) ||  // push-pull, active high
+        !WriteSingle(REG_INT_MAP_DATA, 0x44) ||  // gyr/acc drdy -> INT1
+        !WriteSingle(REG_INT_LATCH, 0x00))       // 非锁存模式（脉冲）
+    {
+      return false;
+    }
 
     int1_->EnableInterrupt();
 
@@ -512,13 +538,20 @@ class BMI270
     cs_->Write(true);
   }
 
-  // 写单个寄存器，并回读确认写入成功
-  void WriteSingle(uint8_t reg, uint8_t data)
+  // 写单个寄存器并回读确认，最多写入 WRITE_VERIFY_ATTEMPTS 次；
+  // 回读值始终与写入值不一致时输出警告并返回 false
+  bool WriteSingle(uint8_t reg, uint8_t data)
   {
-    do
+    for (uint8_t i = 0; i < WRITE_VERIFY_ATTEMPTS; i++)
     {
       WriteNoVerify(reg, data);
-    } while (ReadSingle(reg) != data);
+      if (ReadSingle(reg) == data)
+      {
+        return true;
+      }
+    }
+    XR_LOG_WARN("BMI270: write verify failed, reg=0x%02X", reg);
+    return false;
   }
 
   // 读单个寄存器（BMI270 第 1 字节为 dummy，第 2 字节才是数据）
