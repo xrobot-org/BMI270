@@ -71,7 +71,7 @@ BMI270(LibXR::GPIO& cs,
 - `pid_param`：温控 PID，`LibXR::PID<float>::Param`，字段为 `k, p, i, d, i_limit, out_limit, cycle`，默认 `k = 0.2`、`p = 1.0`、`i = 0.1`、`d = 0`、`i_limit = 0.3`、`out_limit = 1.0`、`cycle = false`。
 - `gyro_topic_name`、`accl_topic_name`：发布的 Topic 名称，默认 `"bmi270_gyro"`、`"bmi270_accl"`。
 - `target_temperature`：目标温度，单位 °C，默认 45。
-- `task_stack_depth`：采样线程栈深，默认 512。
+- `task_stack_depth`：采样线程栈深，单位字节，默认 512。
 
 Dependencies:
 
@@ -94,7 +94,7 @@ Configuration parameters (`Param`):
 - `pid_param`: temperature-control PID, `LibXR::PID<float>::Param` with fields `k, p, i, d, i_limit, out_limit, cycle`, default `k = 0.2`, `p = 1.0`, `i = 0.1`, `d = 0`, `i_limit = 0.3`, `out_limit = 1.0`, `cycle = false`.
 - `gyro_topic_name`, `accl_topic_name`: names of the published Topics, default `"bmi270_gyro"` and `"bmi270_accl"`.
 - `target_temperature`: target temperature in °C, default 45.
-- `task_stack_depth`: stack depth of the sampling thread, default 512.
+- `task_stack_depth`: stack depth of the sampling thread in bytes, default 512.
 
 ## 3. Topic
 
